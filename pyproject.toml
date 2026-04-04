@@ -1,0 +1,11 @@
+[project]
+name = "wikipedia-game"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.2.6",
+    "sentence-transformers>=5.3.0",
+    "torch>=2.11.0",
+]

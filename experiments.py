@@ -1,0 +1,1 @@
+# Defines test pairs (easy/medium/hard),runs all algorithms, collects metrics
