@@ -146,3 +146,100 @@ Greedy is not guaranteed to find the shortest path. It found a length-4 path to 
 ### Why We Stopped Here
 
 Greedy is working well enough to serve its role in the project. The next step is A*, which adds path cost g(n) to the heuristic score, giving it the same guidance as Greedy but with a guarantee of finding the optimal path if the heuristic is admissible.
+
+## A* Search Performance Notes 4/5/2026, weighted A* with lazy heuristic evaluation
+
+### Trial 1 — Standard A*, Eager Heuristic Evaluation (Failed)
+
+Our first A* implementation used `f(n) = g(n) + h(n)` with h() computed for
+every neighbor before pushing to the heap — the most straightforward reading
+of the algorithm.
+
+Problem: h() calls `get_summary()` + `model.encode()` for each neighbor. With
+~700 links per page, that's ~700 cold API calls per expansion at ~0.5s each.
+The Napoleon pair hung for over an hour and had to be killed manually. It never
+produced a result.
+
+---
+
+### Trial 2 — Standard A*, Lazy Heuristic Evaluation (Timeout)
+
+Fix: only compute h() for neighbors whose embeddings are already in the cache.
+Uncached neighbors are pushed with `f = g_next` as a lower-bound estimate,
+deferring their real score until they are popped.
+
+This eliminated the cold-cache hang. But a new problem emerged: the `g(n)` term
+kept pulling the search back to re-examine shallow nodes. With a branching factor
+of ~700, the open set exploded and A* expanded 500 nodes on the Napoleon pair
+(hitting the cap) while Greedy solved the same pair in just 8 expansions.
+
+| Target | Status | Nodes Expanded | Path Length | Time |
+|--------|--------|----------------|-------------|------|
+| Guido van Rossum | success | 1 | 1 | 0.0s |
+| Alan Turing | success | 2 | 2 | 0.02s |
+| Napoleon | timeout | 500 | — | 188s |
+
+Root cause: our sentence-embedding heuristic is strong enough to guide search
+on its own. Adding `g(n)` at equal weight introduces a bias toward
+short-but-wrong paths that the heuristic would never have taken. Standard A* is
+theoretically optimal but practically worse here because Wikipedia's branching
+factor punishes cautious exploration.
+
+---
+
+### Trial 3 — Weighted A*, Lazy Heuristic Evaluation (Current)
+
+Fix: `f(n) = g(n) + 3.0 * h(n)`. Biasing the heuristic term lets A* behave
+close to Greedy when h is reliable, while still using `g` as a tiebreaker to
+prefer shorter paths among equally-scored nodes. Lazy evaluation is retained —
+h() is only computed for neighbors already in the embeddings cache.
+
+| Target | Status | Nodes Expanded | Path Length | Time |
+|--------|--------|----------------|-------------|------|
+| Guido van Rossum | success | 1 | 1 | 0.0s |
+| Alan Turing | success | 2 | 2 | 0.03s |
+| Napoleon | success | 141 | **3** | 29s |
+
+### Key Result
+
+A* found a **shorter path to Napoleon than Greedy** (3 hops vs 4 hops):
+
+`Python (programming language) → Character string → Palindrome → Napoleon`
+
+vs Greedy's path:
+
+`Python (programming language) → Matrix multiplication → Jacques Philippe Marie Binet → King Louis-Philippe → Napoleon`
+
+This is the theoretical difference between the two algorithms playing out in
+practice. Greedy got lucky and found *a* path fast (8 expansions, 4 hops) but
+it was not optimal. A* spent more expansions (141) and more time (29s) but
+found a genuinely shorter route — which is exactly the tradeoff A* is designed
+to make.
+
+### Comparison: Greedy vs A* (Warm Cache)
+
+| Metric | Greedy | A* |
+|--------|--------|----|
+| Napoleon path length | 4 hops | **3 hops** |
+| Napoleon nodes expanded | **8** | 141 |
+| Napoleon time | **0.03s** | 29s |
+| Optimality guarantee | None | Within 3× optimal (weight=3.0) |
+
+### What We Did Not Try
+
+- Tuning the weight parameter — `weight=3.0` was chosen by intuition; a
+  systematic sweep across `1.0`, `2.0`, `5.0` might reveal a better tradeoff
+- Computing h() for all neighbors in a batched encode call — sentence-transformers
+  supports batch encoding, which could make eager evaluation viable and restore
+  true A* ordering
+- Bidirectional A* — searching from both source and target simultaneously would
+  dramatically reduce the number of expansions needed
+
+### Why We Stopped Here
+
+The weighted A* result closes the algorithm comparison meaningfully. We now have
+a concrete, quantified tradeoff: Greedy is faster and cheaper to run; A* finds
+shorter paths at the cost of more expansions. The 29s warm-cache time is a
+known limitation tied to the number of cached neighbors being scored per
+expansion, not a fundamental flaw in the approach. This is sufficient for the
+experiment suite and final comparison in Steps 17–20.
