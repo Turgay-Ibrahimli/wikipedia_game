@@ -26,9 +26,10 @@ The project also includes a caching layer for both page links and embeddings, an
 - Step 14 ( Done ): Implement Greedy Best-First Search in search/greedy.py — use a priority queue ordered by h(n). Expand the node with the lowest heuristic value. Track metrics the same way as BFS/DFS.
 - Step 15 ( Done ): Implement A* in search/astar.py — priority queue ordered by f(n) = g(n) + h(n) where g(n) is the number of hops so far. Use a closed set to avoid revisiting nodes. Track metrics.
 - Step 16 ( Done ): Test both informed algorithms — run Greedy and A* on the same easy pair. Compare paths and nodes expanded against BFS. A* should find a path close to BFS-optimal; Greedy may find it faster but with a longer path.
-- Step 16.5: Document the cold-run bottleneck and caching strategy — after observing that cold runs on new page pairs take 400–500s due to live Wikipedia API calls for summaries, we established a warm-cache protocol: 
+- Step 16.5 ( Unnecessary): Document the cold-run bottleneck and caching strategy — after observing that cold runs on new page pairs take 400–500s due to live Wikipedia API calls for summaries, we established a warm-cache protocol: 
   run each new pair once to populate both cache/links_cache.json and cache/embeddings_cache.pkl, then all subsequent runs (including the full  experiment suite in Step 18) execute in under 5 seconds total. This makes 
   the DBpedia abstracts dump unnecessary for a 9-pair experiment suite — the one-time cold run per pair is the acceptable tradeoff.
+  the process is unnecessary now since I already solved the problem of cold start and other caching things by just not getting the summary
 - Step 17: Build experiments.py — define test pairs in three tiers: easy (3 pairs, closely related topics), medium (3 pairs, loosely related), hard (3 pairs, seemingly unrelated). Set a timeout of 5 minutes and a node expansion cap of 10,000 per run.
 - Step 18: Run all experiments — loop over every test pair, run all four algorithms on each, collect metrics into a list, and save everything to results/results.csv. Handle timeouts gracefully by recording "timeout" instead of a path.
 - Step 19: Build visualize.py — read results/results.csv and generate: a bar chart comparing nodes expanded across algorithms, a table of path lengths per pair, and a grouped chart showing time taken. Save plots to results/.
