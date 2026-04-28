@@ -1,64 +1,133 @@
- # WikiGraph class — fetches pages, returns neighbors (handles API calls, link parsing, caching)
+# WikiGraph class - fetches Wikipedia pages and exposes a neighbor/summary API.
 
-import wikipediaapi
+from __future__ import annotations
+
 import json
 import os
+import random
+import time
+from typing import Callable, TypeVar
+
+import wikipediaapi
+
+_T = TypeVar("_T")
+
 
 class WikiGraph:
-    def __init__(self, cache_path="cache/links_cache.json"):
-        self.wiki = wikipediaapi.Wikipedia(
-            user_agent="WikipediaGame/1.0 (your_email@example.com)",
-            language="en"
+    def __init__(self, cache_path: str = "cache/links_cache.json"):
+        # Wikipedia expects a descriptive UA with contact info. The placeholder UA can
+        # trigger throttling or dropped connections.
+        user_agent = os.getenv(
+            "WIKIPEDIA_USER_AGENT",
+            "WikipediaGame/1.0 (contact: set WIKIPEDIA_USER_AGENT)",
         )
+        timeout_s = float(os.getenv("WIKIPEDIA_TIMEOUT", "10.0"))
+
+        # wikipedia-api forwards kwargs (like timeout) into request kwargs.
+        self.wiki = wikipediaapi.Wikipedia(user_agent=user_agent, language="en", timeout=timeout_s)
         self.cache_path = cache_path
         self.cache = self._load_cache()
 
-        # Prefixes to filter out — these aren't real articles
+        self._warned_network_error = False
+
+        # Prefixes to filter out - these aren't real articles.
         self.skip_prefixes = (
-            "Category:", "Help:", "File:", "Template:",
-            "Wikipedia:", "Special:", "Talk:", "Portal:",
-            "Draft:", "Module:", "MediaWiki:", "User:"
+            "Category:",
+            "Help:",
+            "File:",
+            "Template:",
+            "Wikipedia:",
+            "Special:",
+            "Talk:",
+            "Portal:",
+            "Draft:",
+            "Module:",
+            "MediaWiki:",
+            "User:",
         )
 
-    def _load_cache(self):
-        if not os.path.exists(self.cache_path):  # cache_file -> cache_path
+    def _with_retries(self, fn: Callable[[], _T], *, attempts: int = 3, base_delay_s: float = 0.4) -> _T:
+        last_exc: Exception | None = None
+        for i in range(attempts):
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                # Exponential backoff with small jitter to avoid hammering Wikipedia.
+                delay = base_delay_s * (2**i) + random.random() * 0.2
+                time.sleep(delay)
+
+        assert last_exc is not None
+        raise last_exc
+
+    def _maybe_warn_network(self, err: Exception) -> None:
+        if self._warned_network_error:
+            return
+        self._warned_network_error = True
+        print(
+            "Warning: Wikipedia request failed (network/rate-limit). "
+            "Set WIKIPEDIA_USER_AGENT to a real contact string and retry."
+        )
+        print(f"  details: {type(err).__name__}: {err}")
+
+    def _load_cache(self) -> dict:
+        if not os.path.exists(self.cache_path):
             return {}
-        
-        with open(self.cache_path, 'r') as f:    # cache_file -> cache_path
+        with open(self.cache_path, "r", encoding="utf-8") as f:
             content = f.read().strip()
             if not content:
                 return {}
             return json.loads(content)
 
-    def save_cache(self):
+    def save_cache(self) -> None:
         os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
-        with open(self.cache_path, "w") as f:
+        with open(self.cache_path, "w", encoding="utf-8") as f:
             json.dump(self.cache, f)
 
-    def get_neighbors(self, page_title):
+    def get_neighbors(self, page_title: str) -> list[str]:
         """Return list of outgoing link titles from a Wikipedia page."""
         if page_title in self.cache:
             return self.cache[page_title]
 
-        page = self.wiki.page(page_title)
-        if not page.exists():
-            self.cache[page_title] = []
-            return []
+        try:
+            page = self.wiki.page(page_title)
 
-        links = [
-            title for title in page.links.keys()
-            if not title.startswith(self.skip_prefixes)
-        ]
+            def _fetch_links() -> list[str]:
+                if not page.exists():
+                    return []
+                return [
+                    title
+                    for title in page.links.keys()
+                    if not title.startswith(self.skip_prefixes)
+                ]
+
+            links = self._with_retries(_fetch_links)
+        except Exception as exc:
+            self._maybe_warn_network(exc)
+            # Don't cache failures; they might succeed later.
+            return []
 
         self.cache[page_title] = links
         return links
 
-    def get_summary(self, page_title):
-        """Return the summary (first paragraph) of a page — used by heuristic later."""
-        page = self.wiki.page(page_title)
-        if not page.exists():
-            return ""
-        return page.summary
+    def get_summary(self, page_title: str) -> str:
+        """Return the summary of a page - used by the embedding heuristic."""
+        try:
+            page = self.wiki.page(page_title)
 
-    def page_exists(self, page_title):
-        return self.wiki.page(page_title).exists()
+            def _fetch_summary() -> str:
+                if not page.exists():
+                    return ""
+                return page.summary or ""
+
+            return self._with_retries(_fetch_summary)
+        except Exception as exc:
+            self._maybe_warn_network(exc)
+            return ""
+
+    def page_exists(self, page_title: str) -> bool:
+        try:
+            return self.wiki.page(page_title).exists()
+        except Exception as exc:
+            self._maybe_warn_network(exc)
+            return False

@@ -42,7 +42,9 @@ cd wikipedia_game
 
 ### With uv
 ```bash
+cd wikipedia_game
 uv venv
+cd ..
 ```
 
 ### With pip
@@ -66,9 +68,19 @@ python3 -m venv .venv
 .venv\Scripts\activate
 ```
 
+If you created the venv inside `wikipedia_game/` (the `uv` commands above do this), activate it from the repo root with:
+```powershell
+wikipedia_game\.venv\Scripts\activate
+```
+
 ### macOS / Linux
 ```bash
 source .venv/bin/activate
+```
+
+If you created the venv inside `wikipedia_game/`, activate it from the repo root with:
+```bash
+source wikipedia_game/.venv/bin/activate
 ```
 
 You should see `(.venv)` in your terminal prompt.
@@ -79,12 +91,15 @@ You should see `(.venv)` in your terminal prompt.
 
 ### With uv
 ```bash
+# Run from the directory that contains `pyproject.toml`
+cd wikipedia_game
 uv sync
+cd ..
 ```
 
 ### With pip
 ```bash
-pip install -r requirements.txt
+pip install -r wikipedia_game/requirements.txt
 ```
 
 ---
@@ -93,14 +108,14 @@ pip install -r requirements.txt
 
 ### Single search (interactive)
 ```bash
-python main.py --source "Python (programming language)" --target "Napoleon" --algorithm greedy
+python wikipedia_game/main.py --source "Python (programming language)" --target "Napoleon" --algorithm greedy
 ```
 
 Available algorithms: `bfs`, `dfs`, `greedy`, `astar`
 
 ### Run full experiments
 ```bash
-python main.py --experiments
+python wikipedia_game/main.py --experiments --all-algorithms
 ```
 
 Results will be saved to `results/results.csv`.
@@ -110,7 +125,7 @@ Results will be saved to `results/results.csv`.
 ## 7. Visualize Results
 
 ```bash
-python visualize.py
+python wikipedia_game/visualize.py
 ```
 
 Charts will be saved to `results/`.
@@ -122,3 +137,4 @@ Charts will be saved to `results/`.
 - On first run, the program will fetch Wikipedia pages and compute embeddings — this is slow but only happens once. Results are cached in `cache/`.
 - Subsequent runs will be significantly faster as everything is read from cache.
 - The `sentence-transformers` model (`all-MiniLM-L6-v2`) will be downloaded automatically on first run (~90MB).
+- If you see connection/rate-limit errors, set `WIKIPEDIA_USER_AGENT` to a real contact string (e.g. `WikipediaGame/1.0 (email: you@example.com)`) and rerun.

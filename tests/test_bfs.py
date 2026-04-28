@@ -1,4 +1,10 @@
-# test_bfs.py
+# tests/test_bfs.py
+import os
+import sys
+
+# Allow running directly from repo root: `python wikipedia_game/tests/test_bfs.py`
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from wiki_graph import WikiGraph
 from search.bfs import bfs
 

@@ -1,4 +1,10 @@
-# test_graph.py (temporary, just to verify)
+# tests/test_graph.py (temporary, just to verify)
+import os
+import sys
+
+# Allow running directly from repo root: `python wikipedia_game/tests/test_graph.py`
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from wiki_graph import WikiGraph
 
 graph = WikiGraph()
