@@ -3,7 +3,7 @@ import time
 import tracemalloc
 import heapq
 from metrics import SearchMetrics
-from heuristic import h
+from heuristic import h, cosine_distances_to_target
 
 def greedy(source, target, graph, max_nodes=10000):
     """
@@ -58,10 +58,10 @@ def greedy(source, target, graph, max_nodes=10000):
                 status="success"
             )
 
-        for neighbor in neighbors:
-            if neighbor not in visited:
-                score = h(neighbor, target, graph)
-                heapq.heappush(heap, (score, path + [neighbor]))
+        candidates = [n for n in neighbors if n not in visited]
+        scores = cosine_distances_to_target(candidates, target, graph)
+        for neighbor, score in zip(candidates, scores, strict=False):
+            heapq.heappush(heap, (score, path + [neighbor]))
 
     tracemalloc.stop()
     return SearchMetrics(

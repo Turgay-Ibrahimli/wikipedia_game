@@ -246,3 +246,78 @@ shorter paths at the cost of more expansions. The 29s warm-cache time is a
 known limitation tied to the number of cached neighbors being scored per
 expansion, not a fundamental flaw in the approach. This is sufficient for the
 experiment suite and final comparison in Steps 17–20.
+
+
+Here's a README section you can paste directly into your existing README.md, matching the style of your current progress notes:
+
+Optimization Log — Embedding & Speed Improvements (4/28/2026)
+The Problem We Hit
+After implementing Greedy and A* with the semantic heuristic, cold runs were taking 400–500 seconds per pair. The root cause was identified by comparing our approach to a reference implementation of the same Wikipedia speedrun concept.
+Our code was making hundreds of network calls per search step. When Greedy expanded a node with ~700 neighbor links, the code called get_summary() for each neighbor to fetch its Wikipedia summary, then ran model.encode() on each summary individually, then wrote the embeddings cache to disk after every single embedding. So one page expansion meant up to 700 API calls, 700 individual encode calls, and 700 disk writes to embeddings_cache.pkl. This is what caused the ConnectionError crash on harder pairs — not a logic bug, but sheer network saturation.
+
+What We Changed
+1. Embed link titles instead of page summaries
+The biggest single change. Instead of calling get_summary() on each neighbor and embedding the result, we now pass the page title string directly to the embedding model (e.g. "Matrix multiplication" instead of fetching and embedding that page's full summary paragraph).
+This eliminated the network bottleneck entirely. All neighbor titles are already available from scraping the current page — zero extra API calls needed per expansion.
+Modified files: heuristic.py, search/greedy.py
+2. Batch all neighbor embeddings into a single encode call
+Previously, neighbors were encoded one by one in a Python loop:
+pythonfor neighbor in neighbors:
+    score = h(neighbor, target)
+We replaced this with a single batched call:
+pythonmodel.encode([list_of_all_neighbor_titles])
+sentence-transformers handles batching internally and it is dramatically faster — the difference between 700 sequential encode calls and one matrix operation.
+Added to heuristic.py: get_embeddings_batch() and cosine_distances_to_target()
+3. Stop writing cache on every embedding
+Previously embeddings_cache.pkl was written to disk after every single new embedding. We changed this to save at the end of the search run instead, eliminating hundreds of redundant I/O operations per expansion.
+
+Results After Optimization
+Test pair: Python (programming language) → Napoleon using Greedy
+MetricBeforeAfterStatusConnectionError / crashsuccessTime400–500s (cold)5.1sNodes expanded—7Path length—4 hops
+Path found:
+Python (programming language) → Matrix multiplication → Jacques Philippe Marie Binet → Charles X of France → Napoleon
+The path is semantically coherent — the heuristic navigated from a programming language through linear algebra to French mathematical history and landed on Napoleon in 4 hops. This is comparable to the reference implementation's ~6 second result before it introduced LLMs.
+
+What We Did Not Try
+
+Embedding page summaries in batch (instead of titles) — this would give richer semantic signal than titles alone but would reintroduce network calls; a local Wikipedia dump would make this viable
+Pre-caching embeddings for the most popular Wikipedia pages before running searches
+Applying the same batching optimization to A* — A* currently uses lazy heuristic evaluation to avoid cold API calls; batched title embeddings could replace that workaround entirely and restore true A* ordering
+
+
+Why We Stopped Here
+The three changes together brought cold-run performance from crashing/unusable to 5 seconds, which is sufficient for the experiment suite in Steps 17–20. The warm-cache times were already under 0.03s — this optimization closes the gap for cold runs too, making the caching pre-warm step from Step 16.5 much less critical. Further embedding quality improvements (summaries vs titles) are a known tradeoff we are accepting in exchange for speed and reliability.
+
+
+
+Here's a clean list you can paste at the end of your README:
+
+Future Improvements & Known Limitations
+Algorithm Improvements
+
+Apply the same title-batching optimization to A* — A* currently uses lazy heuristic evaluation as a workaround for the cold-cache problem; batched title embeddings would eliminate that workaround and restore true A* ordering
+Tune the A* weight parameter systematically — weight=3.0 was chosen by intuition; a sweep across 1.0, 2.0, 5.0, 10.0 would reveal the optimal speed/optimality tradeoff
+Implement bidirectional search for both Greedy and A* — searching from source and target simultaneously would dramatically reduce expansions on hard pairs like Thumb wrestling → Napoleon (currently 8 hops)
+Add beam search as a fifth algorithm — limiting neighbors pushed to the heap per expansion would reduce memory usage on wide pages
+
+Heuristic Improvements
+
+Embed page summaries in batch instead of titles — titles are fast but lose semantic richness; a local Wikipedia dump would make summary embeddings viable without network calls
+Test alternative embedding models — all-MiniLM-L6-v2 was chosen for speed; larger models like all-mpnet-base-v2 may produce better semantic guidance at the cost of slower encoding
+Handle heuristic ties explicitly — when multiple neighbors score very similarly, the current choice is essentially arbitrary; a tiebreaker strategy could improve path quality
+
+LLM Integration
+
+Add LLM-based players via API (Gemini, Claude) as an alternative to the embedding heuristic — LLMs showed superior performance on obscure pages in the reference implementation, averaging fewer hops than pure embedding approaches
+Build a hybrid mode — use embeddings for fast candidate filtering, then use an LLM to make the final link selection from the top 10 candidates
+
+Evaluation & Experiments
+
+Run the full experiment suite (Steps 17–20) across all four algorithms on easy/medium/hard pairs and generate comparison visualizations
+Find and document failure cases — pairs where Greedy takes 15+ hops or gets stuck in a topic cluster, which would quantify the heuristic's blind spots
+Add a human vs AI competition mode similar to the reference implementation, recording human click times and hop counts for direct comparison
+
+Infrastructure
+
+Pre-cache embeddings for the 10,000 most visited Wikipedia pages so cold runs on popular topics are eliminated entirely
+Add a Wikipedia bulk data dump loader as an alternative to live API calls, enabling offline graph traversal for BFS and DFS on deeper paths
