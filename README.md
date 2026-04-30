@@ -322,3 +322,56 @@ Infrastructure
 
 Pre-cache embeddings for the 10,000 most visited Wikipedia pages so cold runs on popular topics are eliminated entirely
 Add a Wikipedia bulk data dump loader as an alternative to live API calls, enabling offline graph traversal for BFS and DFS on deeper paths
+
+
+## Model2Vec Experiment Log (4/28/2026)
+
+### What We Tried
+
+We replaced `sentence-transformers` (all-MiniLM-L6-v2, 384-dim contextual embeddings, requires PyTorch) with `Model2Vec` (minishlab/M2V_base_output, 256-dim static embeddings, only requires numpy) to eliminate the cold-start bottleneck caused by PyTorch loading and transformer inference.
+
+### What We Also Added
+
+Before the Model2Vec experiment, we added a **title resolution** feature (`resolve_title`) that uses the MediaWiki search API to convert vague user input to canonical Wikipedia page titles (e.g., "obama" → "Barack Obama", "spongebob" → "SpongeBob SquarePants"). This adds at most 2 HTTP requests per run and a `--no-resolve` flag preserves exact-match behavior.
+
+### Speed Results (Model2Vec)
+
+| Metric | MiniLM (old) | Model2Vec (new) |
+|--------|-------------|-----------------|
+| Import time | 10-15s (PyTorch load) | <1s (numpy only) |
+| Model size | ~90MB + PyTorch (~2GB) | ~30MB |
+| Warm cache run (Obama → Dragon fruit) | 3.3s | 0.4s |
+| Cold cache run (Obama → Dragon fruit) | ~5s (with partial cache) | ~20s (fully empty cache) |
+| Embedding computation (700 titles) | ~2-3s | ~0.01s |
+
+### Quality Results (Model2Vec)
+
+| Test Pair | MiniLM Hops | Model2Vec Hops |
+|-----------|-------------|----------------|
+| SpongeBob SquarePants → Adolf Hitler | 2 | 2 |
+| Butter → Adolf Hitler | 2 | 2 |
+| Cheese → Genghis Khan | 4 | 4 |
+| Python → Napoleon | 4 | 4 |
+| Pickle → International Space Station | 5 | 5 |
+| Thumb wrestling → Napoleon | 8 | 8 |
+| Barack Obama → Dragon fruit | 10 | 9 |
+| Apple → Mechanic | 8 (13 expansions) | 16 (164 expansions) |
+| Barack Obama → Pitaya | timeout (500 nodes) | timeout (500 nodes) |
+
+Easy and medium pairs showed identical or comparable hop counts. Hard pairs showed significant quality degradation — Apple → Mechanic took 16 hops wandering through chemistry and biology topics, where MiniLM solved it in 8 hops with a coherent path through Food → Mining → Automotive → Mechanic. The heuristic lost the ability to make conceptual leaps (e.g., understanding that "Mechanic" relates to machines/tools/repair) because static embeddings lack the contextual understanding of transformer-based models.
+
+### Conclusion
+
+Model2Vec is ~500x faster for embedding computation and eliminates the PyTorch dependency entirely, but the quality tradeoff is too significant for our use case. The greedy search relies heavily on heuristic precision — when the heuristic is even slightly worse at ranking neighbors, the search wanders into wrong topic clusters and takes many more hops to recover. For a project comparing search algorithm quality across different pairs, heuristic accuracy matters more than startup speed.
+
+**Decision: reverted to MiniLM (all-MiniLM-L6-v2) as the default model.** Model2Vec remains a viable option for a future `--fast` mode where speed matters more than path quality, or as a pre-filter to narrow 700 candidates down to 50 before scoring them with MiniLM.
+
+### Resolve Feature (Kept)
+
+The title resolution feature was kept regardless of model choice. It solves a real usability problem — previously, non-exact titles like "obama" or "dragon fruit" caused the search to hang on Wikipedia API calls for nonexistent pages. One caveat discovered: the resolver sometimes maps to a less-connected canonical title (e.g., "Dragon fruit" → "Pitaya") which can make the search harder. The `--no-resolve` flag exists for these edge cases.
+
+
+Failure Case: Barack Obama → Pitaya (4/28/2026)
+We discovered that the target title itself can make a pair unsolvable for the embedding heuristic. "Barack Obama → Dragon fruit" succeeds in 10 hops (14 expansions, 0.4s warm), but "Barack Obama → Pitaya" — the same Wikipedia article under its canonical botanical name — times out at 500 nodes with both MiniLM and Model2Vec.
+The reason is a mismatch between semantic similarity and graph connectivity. The heuristic correctly guides the search toward fruit-related pages, but almost no Wikipedia pages actually contain a link titled "Pitaya" — they link to "Dragon fruit" instead. So the search arrives in the right topic neighborhood but can never find the final hop, and spirals through increasingly obscure fruit and botany pages until it hits the node cap.
+This reveals a fundamental limitation of title-based embedding heuristics: they measure how semantically close a neighbor sounds to the target, not whether the target is actually reachable from that neighbor. When the target uses an uncommon or technical title that few pages link to, the heuristic has no way to detect the dead end. This is the strongest argument we've found so far for LLM integration — an LLM would recognize that "Dragon fruit" and "Pitaya" refer to the same thing and select the right link even when the embedding model can't.
