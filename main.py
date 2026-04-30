@@ -61,32 +61,40 @@ def _run_pairs(
     max_nodes: int,
     max_depth: int,
     weight: float,
+    timeout_seconds: int | None = None,
 ) -> list[Any]:
-    runner = _load_runner(algorithm)
     results: list[SearchMetrics] = []
+    use_timeout = timeout_seconds is not None
+
+    if use_timeout:
+        from experiments import run_with_timeout
+    else:
+        runner = _load_runner(algorithm)
 
     for source, target in pairs:
-        if algorithm.lower() == "dfs":
-            result = runner(source, target, graph, max_depth=max_depth, max_nodes=max_nodes)
-        elif algorithm.lower() == "astar":
-            result = runner(source, target, graph, max_nodes=max_nodes, weight=weight)
+        if use_timeout:
+            result = run_with_timeout(
+                algorithm,
+                source,
+                target,
+                max_nodes=max_nodes,
+                timeout_seconds=timeout_seconds,
+                max_depth=max_depth,
+                weight=weight,
+            )
         else:
-            result = runner(source, target, graph, max_nodes=max_nodes)
+            if algorithm.lower() == "dfs":
+                result = runner(source, target, graph, max_depth=max_depth, max_nodes=max_nodes)
+            elif algorithm.lower() == "astar":
+                result = runner(source, target, graph, max_nodes=max_nodes, weight=weight)
+            else:
+                result = runner(source, target, graph, max_nodes=max_nodes)
 
         results.append(result)
         _print_result(result)
         print()
 
     return results
-
-
-def _default_experiment_pairs() -> list[tuple[str, str]]:
-    return [
-        ("Python (programming language)", "Guido van Rossum"),
-        ("Python (programming language)", "Alan Turing"),
-        ("Python (programming language)", "Napoleon"),
-    ]
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Wikipedia Game search runner")
@@ -111,27 +119,42 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run bfs/dfs/greedy/astar for each pair (overrides --algorithm)",
     )
-    parser.add_argument("--max-nodes", type=int, default=500, help="Stop after expanding this many nodes")
+    parser.add_argument("--max-nodes", type=int, default=None, help="Stop after expanding this many nodes")
     parser.add_argument("--max-depth", type=int, default=6, help="DFS depth limit (only used for dfs)")
     parser.add_argument("--weight", type=float, default=3.0, help="A* heuristic weight (only used for astar)")
     parser.add_argument("--experiments", action="store_true", help="Run the built-in experiment pairs")
+    parser.add_argument("--timeout-seconds", type=int, default=None, help="Wall-clock timeout per run")
     parser.add_argument("--csv", default="results/results.csv", help="If set, writes results to this CSV path")
 
     args = parser.parse_args(argv)
 
+    from experiments import EXPERIMENT_DFS_MAX_DEPTH, EXPERIMENT_MAX_NODES, EXPERIMENT_TIMEOUT_SECONDS, get_experiment_pairs
     from metrics import export_to_csv
     from wiki_graph import WikiGraph
+
+    max_nodes = args.max_nodes
+    timeout_seconds = args.timeout_seconds
+    max_depth = args.max_depth
 
     graph = WikiGraph()
     try:
         if args.experiments:
-            pairs = _default_experiment_pairs()
+            pairs = get_experiment_pairs()
+            if max_nodes is None:
+                max_nodes = EXPERIMENT_MAX_NODES
+            if timeout_seconds is None:
+                timeout_seconds = EXPERIMENT_TIMEOUT_SECONDS
+            if args.max_depth == 6:
+                max_depth = EXPERIMENT_DFS_MAX_DEPTH
         elif args.pair:
             pairs = [(a, b) for a, b in args.pair]
         else:
             if not args.source or not args.target:
                 raise SystemExit("Provide --source/--target, or use --pair, or pass --experiments.")
             pairs = [(args.source, args.target)]
+
+        if max_nodes is None:
+            max_nodes = 500
 
         algorithms = ["bfs", "dfs", "greedy", "astar"] if args.all_algorithms else [args.algorithm]
         results: list[Any] = []
@@ -141,9 +164,10 @@ def main(argv: list[str] | None = None) -> int:
                     graph,
                     pairs,
                     algorithm,
-                    max_nodes=args.max_nodes,
-                    max_depth=args.max_depth,
+                    max_nodes=max_nodes,
+                    max_depth=max_depth,
                     weight=args.weight,
+                    timeout_seconds=timeout_seconds,
                 )
             )
         if args.csv:
