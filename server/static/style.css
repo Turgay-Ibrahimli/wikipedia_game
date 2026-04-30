@@ -1,0 +1,200 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  margin: 0;
+}
+
+.container {
+  max-width: 800px;
+  margin: 50px auto;
+  padding: 20px;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.inputs input {
+  flex: 1;
+  padding: 10px;
+  border-radius: 6px;
+  border: none;
+  width: 100%;
+}
+
+.inputs button {
+  padding: 10px 15px;
+  background: #38bdf8;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.inputs button:hover {
+  background: #0ea5e9;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  background: #1e293b;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.stats p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.stats span {
+  color: #38bdf8;
+  font-weight: bold;
+}
+
+.path-container {
+  background: #1e293b;
+  padding: 15px;
+  border-radius: 8px;
+}
+
+#path li {
+  margin: 5px 0;
+}
+
+.visualization {
+  margin-top: 20px;
+}
+
+
+/* Container for label + select */
+.select-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 15px;
+}
+
+/* Label */
+.select-group label {
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+/* Select styling */
+#algorithms {
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  font-size: 14px;
+  cursor: pointer;
+  outline: none;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+/* Hover + focus */
+#algorithms:hover {
+  border-color: #38bdf8;
+}
+
+#algorithms:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
+}
+
+/* Dropdown options (limited styling support depending on browser) */
+#algorithms option {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+
+.result{
+  display: none;
+}
+
+#source-text {
+  color:#0ea5e9;
+}
+
+#target-text {
+  color: rgb(189, 189, 90);
+}
+
+
+.path-container {
+  background: #1e293b;
+  padding: 15px;
+  border-radius: 10px;
+}
+
+.path-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-node {
+  background: #334155;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: 0.2s;
+}
+
+.path-node:hover {
+  background: #38bdf8;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.path-arrow {
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.input-group {
+  position: relative;
+  flex: 1;
+}
+
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  margin-top: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.suggestion-item {
+  padding: 8px;
+  cursor: pointer;
+}
+
+.suggestion-item:hover {
+  background: #38bdf8;
+  color: #0f172a;
+}

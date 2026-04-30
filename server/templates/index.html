@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Wiki Path Finder</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script defer src="{{ url_for('static', filename='script.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='autocomplete.js') }}"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Wikipedia Game</h1>
+
+      <div class="inputs">
+        <div class="select-group">
+          <label for="algorithms">Choose algorithm</label>
+          <select id="algorithms">
+            <option value="bfs">BFS</option>
+            <option value="dfs">DFS</option>
+            <option value="greedy">Greedy</option>
+            <option value="astar">A*</option>
+          </select>
+        </div>
+
+        <div class="input-group">
+          <input type="text" id="source" placeholder="Source page (e.g. Obama)" />
+          <div id="source-suggestions" class="suggestions"></div>
+        </div>
+
+        <div class="input-group">
+          <input type="text" id="target" placeholder="Target page (e.g. Orange)" />
+          <div id="target-suggestions" class="suggestions"></div>
+        </div>
+        <button id="searchButton">Find Path</button>
+      </div>
+
+      <div class="result">
+        <h2 style="text-align: center">
+          Traveling from <span id="source-text">Obama</span> to
+          <span id="target-text">Orange</span>...
+        </h2>
+      </div>
+
+      <div class="stats">
+        <p>⏱ Time: <span id="time">-</span></p>
+        <p>🔎 Nodes Expanded: <span id="nodes">-</span></p>
+        <p>📏 Path Length: <span id="path-length">-</span></p>
+        <p>💾 Peak Memory: <span id="memory">-</span> MB</p>
+        <p>📡 Status: <span id="status">Idle</span></p>
+      </div>
+
+      <div class="path-container">
+        <h3>Path</h3>
+        <ul id="path"></ul>
+      </div>
+
+      <!-- <div class="visualization">
+      <h3>Traversal (optional)</h3>
+      <div id="graph"></div>
+    </div> -->
+    </div>
+  </body>
+</html>
