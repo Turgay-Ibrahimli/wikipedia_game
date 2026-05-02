@@ -520,3 +520,28 @@ This is a fundamental weakness of title-based embeddings. The model is doing str
 The good news is it still worked. Despite wasting ~50 expansions on name-matching dead ends, Greedy eventually stumbled onto a productive path through politics. 74 expansions and 43 seconds is expensive compared to the easy pairs, but it's infinitely better than A*'s result on the same pair — A* was still stuck at depth 1 after 230 expansions when it timed out.
 The path itself is surprisingly coherent once it gets going. Frog → Hawk is a food chain link. Hawk → War hawk is a disambiguation hop. War hawk → Lindsey Graham is a political connection. Then it chains through Trump-era political figures to Hitler (via Bannon's controversial associations), and Hitler → Reagan → Schwarzenegger follows a logical thread of 20th century political figures with the Austrian/American connection.
 Key takeaway for your project: this pair exposes both the strength and the weakness of your approach. The heuristic is powerful enough to eventually navigate across wildly different topics (amphibians to movie stars), but title-based embeddings create false attractors when the target's name contains common words. This is your strongest evidence yet for why summary-based or LLM-based heuristics would be a meaningful upgrade.
+
+
+
+last takeaways and why our research stands out:
+Here's what you actually did and tested, drawn from your README:
+
+**Engineering Discoveries**
+
+You discovered that naive BFS expands 248 nodes for a 1-hop path due to post-pop target checking, and fixed it with early target detection bringing it to 1 node. You hit the 700-API-calls-per-expansion wall with summary embeddings, diagnosed network saturation as the root cause (not a logic bug), and solved it by switching to title embeddings plus batched encoding plus deferred cache writes — bringing cold runs from crashing to 5 seconds. You tested parallel prefetching with ThreadPoolExecutor for BFS frontier expansion. You built a caching layer for both links and embeddings that produces 64x–370x speedups between cold and warm runs.
+
+**Algorithm Findings**
+
+You confirmed BFS and DFS are infeasible beyond 1–2 hops on a live Wikipedia graph with ~700 branching factor — BFS takes ~250 seconds to fail, DFS takes ~4 seconds to fail, neither finds a path. You showed Greedy solves pairs in 2–8 hops with 3–74 node expansions where BFS/DFS time out at 500. You ran A* through three iterations: eager evaluation (hung for an hour), lazy evaluation (trapped by g(n) at 500 nodes), weighted A* with w=3.0 (finally worked). You demonstrated that weighted A* finds shorter paths than Greedy (3 vs 4 hops on Python → Napoleon) at 3–10x time and 50–100x memory cost. You caught A* trapped at depth 1 on Frog → Arnold Schwarzenegger through server logs — 230 expansions, all g=1, heap growing to 42,000 entries.
+
+**Heuristic Analysis**
+
+You identified the title-matching false attractor problem through logs: Greedy spent 50 expansions on "Thomas Arnold" variants when targeting Arnold Schwarzenegger, matching on string similarity rather than conceptual similarity. You documented the Pitaya failure case — Barack Obama → Dragon fruit succeeds in 10 hops, but Barack Obama → Pitaya (the same article) times out because almost no pages link to "Pitaya," revealing a gap between semantic similarity and graph reachability. You tested title resolution via MediaWiki search API and found it can make searches harder when canonical titles are less connected.
+
+**Model Comparison**
+
+You benchmarked MiniLM vs Model2Vec across easy, medium, and hard pairs. Model2Vec was 500x faster for embedding computation and eliminated the PyTorch dependency, but Apple → Mechanic degraded from 8 to 16 hops — static embeddings lost the ability to make conceptual leaps. You made a reasoned decision to revert and documented exactly where quality breaks.
+
+**Documented Tradeoffs**
+
+Every major decision has a recorded before/after: summary vs title embeddings (quality vs speed), MiniLM vs Model2Vec (accuracy vs startup time), Greedy vs A* (speed vs optimality), eager vs lazy heuristic evaluation (correctness vs feasibility), standard vs weighted A* (theoretical guarantees vs practical performance on high-branching graphs).
