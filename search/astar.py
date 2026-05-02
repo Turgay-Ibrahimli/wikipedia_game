@@ -3,9 +3,18 @@ import time
 import tracemalloc
 import heapq
 from metrics import SearchMetrics
-from heuristic import h
+from heuristic import h, cosine_distances_to_target
 
-def astar(source, target, graph, max_nodes=10000, weight=3.0):
+def astar(
+    source,
+    target,
+    graph,
+    max_nodes=10000,
+    weight=3.0,
+    *,
+    timeout_seconds: float | None = None,
+    log_every: int | None = None,
+):
     """
     Weighted A* Search over the Wikipedia link graph.
 
@@ -20,7 +29,7 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
     First implementation: f(n) = g(n) + h(n), with h() computed for every
     neighbor before pushing to the heap.
 
-    Problem: h() calls get_summary() + model.encode() for each neighbor.
+    Problem (old heuristic): h() calls get_summary() + model.encode() for each neighbor.
     With ~700 links per page, that's ~700 cold API calls per expansion.
     The Napoleon pair hung for over an hour and had to be killed manually.
 
@@ -46,7 +55,7 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
     wouldn't have taken. Standard A* is theoretically optimal but practically
     worse here because the branching factor punishes cautious exploration.
 
-    TRIAL 3 — Weighted A* (weight=3.0), lazy heuristic evaluation  ← CURRENT
+    TRIAL 3 — Weighted A* (weight=3.0), batched heuristic evaluation  ← CURRENT
     -------------------------------------------------------------------------
     Fix: f(n) = g(n) + 3.0 * h(n). Biasing the heuristic term lets A*
     behave close to Greedy when h is reliable, while still using g as a
@@ -58,8 +67,8 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
     finds paths of the same length while giving us the g(n) tiebreaker
     for free.
 
-    Lazy evaluation is retained: h() is only computed for neighbors already
-    in the embeddings cache. Uncached neighbors are pushed with f = g_next.
+    Heuristic evaluation is now batched and vectorized (same approach as Greedy):
+    we score all candidate neighbors to the target in one pass.
 
     =========================================================================
     WHY WEIGHTED A* IS THE RIGHT CALL FOR THIS PROBLEM
@@ -73,6 +82,7 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
     systems make when the heuristic is known to be reliable.
     """
     start_time = time.time()
+    deadline = (time.perf_counter() + float(timeout_seconds)) if timeout_seconds is not None else None
     tracemalloc.start()
 
     closed = set()
@@ -82,8 +92,21 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
     # heap: (f, g, page, path)
     heap = [(weight * h_source, 0, source, [source])]
     nodes_expanded = 0
+    last_path = [source]
 
     while heap:
+        if deadline is not None and time.perf_counter() >= deadline:
+            tracemalloc.stop()
+            return SearchMetrics(
+                algorithm="A*",
+                source=source,
+                target=target,
+                path=last_path,
+                path_length=max(0, len(last_path) - 1),
+                status="timeout",
+                nodes_expanded=nodes_expanded,
+                time_taken=round(time.time() - start_time, 4),
+            )
         if nodes_expanded >= max_nodes:
             tracemalloc.stop()
             return SearchMetrics(
@@ -93,11 +116,15 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
             )
 
         f, g, current, path = heapq.heappop(heap)
+        last_path = path
 
         if current in closed:
             continue
         closed.add(current)
         nodes_expanded += 1
+
+        if log_every and nodes_expanded % log_every == 0:
+            print(f"[A*] expanded={nodes_expanded} current={current!r} f={f:.4f} g={g} heap={len(heap)} closed={len(closed)}")
 
         neighbors = graph.get_neighbors(current)
 
@@ -118,20 +145,20 @@ def astar(source, target, graph, max_nodes=10000, weight=3.0):
             )
 
         g_next = g + 1
-        import heuristic as _heuristic_module
-        emb_cache = _heuristic_module.embeddings_cache
 
+        candidates: list[str] = []
         for neighbor in neighbors:
             if neighbor in closed:
                 continue
-            if neighbor not in g_cost or g_next < g_cost[neighbor]:
-                g_cost[neighbor] = g_next
-                if neighbor in emb_cache:
-                    h_neighbor = h(neighbor, target, graph)
-                    f_next = g_next + weight * h_neighbor
-                else:
-                    f_next = g_next  # lower-bound estimate for uncached nodes
-                heapq.heappush(heap, (f_next, g_next, neighbor, path + [neighbor]))
+            if neighbor in g_cost and g_next >= g_cost[neighbor]:
+                continue
+            candidates.append(neighbor)
+
+        scores = cosine_distances_to_target(candidates, target, graph)
+        for neighbor, h_neighbor in zip(candidates, scores, strict=False):
+            g_cost[neighbor] = g_next
+            f_next = g_next + weight * h_neighbor
+            heapq.heappush(heap, (f_next, g_next, neighbor, path + [neighbor]))
 
     tracemalloc.stop()
     return SearchMetrics(

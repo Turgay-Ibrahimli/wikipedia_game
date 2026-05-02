@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import time
 from typing import Iterable
 
 import numpy as np
@@ -14,17 +15,31 @@ EMBEDDINGS_CACHE = "cache/embeddings_cache.pkl"
 def _load_embeddings_cache() -> dict[str, np.ndarray]:
     if not os.path.exists(EMBEDDINGS_CACHE):
         return {}
-    with open(EMBEDDINGS_CACHE, "rb") as f:
-        content = f.read()
-        if not content:
-            return {}
-        return pickle.loads(content)
+    try:
+        with open(EMBEDDINGS_CACHE, "rb") as f:
+            content = f.read()
+            if not content:
+                return {}
+            return pickle.loads(content)
+    except (EOFError, pickle.UnpicklingError, OSError, ValueError) as exc:
+        # Cache can be corrupted if the process is interrupted mid-write.
+        try:
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            corrupt_path = f"{EMBEDDINGS_CACHE}.corrupt-{ts}"
+            os.replace(EMBEDDINGS_CACHE, corrupt_path)
+            print(f"Warning: embeddings cache was corrupted; moved to {corrupt_path}.")
+        except Exception:
+            print("Warning: embeddings cache was corrupted; ignoring and rebuilding.")
+        print(f"  details: {type(exc).__name__}: {exc}")
+        return {}
 
 
 def _save_embeddings_cache(cache: dict[str, np.ndarray]) -> None:
     os.makedirs("cache", exist_ok=True)
-    with open(EMBEDDINGS_CACHE, "wb") as f:
+    tmp_path = f"{EMBEDDINGS_CACHE}.tmp"
+    with open(tmp_path, "wb") as f:
         pickle.dump(cache, f)
+    os.replace(tmp_path, EMBEDDINGS_CACHE)
 
 
 embeddings_cache: dict[str, np.ndarray] = _load_embeddings_cache()

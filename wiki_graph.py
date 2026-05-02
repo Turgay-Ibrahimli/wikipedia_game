@@ -73,16 +73,29 @@ class WikiGraph:
     def _load_cache(self) -> dict:
         if not os.path.exists(self.cache_path):
             return {}
-        with open(self.cache_path, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            if not content:
-                return {}
-            return json.loads(content)
+        try:
+            with open(self.cache_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    return {}
+                return json.loads(content)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            # Cache can be corrupted if the process is interrupted mid-write.
+            try:
+                corrupt_path = f"{self.cache_path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+                os.replace(self.cache_path, corrupt_path)
+                print(f"Warning: links cache was corrupted; moved to {corrupt_path}.")
+            except Exception:
+                print("Warning: links cache was corrupted; ignoring and rebuilding.")
+            print(f"  details: {type(exc).__name__}: {exc}")
+            return {}
 
     def save_cache(self) -> None:
         os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
-        with open(self.cache_path, "w", encoding="utf-8") as f:
+        tmp_path = f"{self.cache_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.cache, f)
+        os.replace(tmp_path, self.cache_path)
 
     def get_neighbors(self, page_title: str) -> list[str]:
         """Return list of outgoing link titles from a Wikipedia page."""

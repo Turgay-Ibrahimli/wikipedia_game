@@ -8,6 +8,47 @@ The project also includes a caching layer for both page links and embeddings, an
 
 ---
 
+## Quickstart
+
+For the full guide, see `SETUP.md`.
+
+### Install dependencies
+
+With pip:
+
+```bash
+pip install -r wikipedia_game/requirements.txt
+```
+
+With uv:
+
+```bash
+cd wikipedia_game
+uv sync
+cd ..
+```
+
+### Run a single search
+
+```bash
+python wikipedia_game/main.py --source "Python (programming language)" --target "Napoleon" --algorithm greedy
+```
+
+### Run experiments
+
+```bash
+python wikipedia_game/main.py --experiments --all-algorithms
+```
+
+### (Optional) Run the Web UI
+
+```bash
+pip install -r wikipedia_game/requirements-server.txt
+python wikipedia_game/server/app.py
+```
+
+Then open `http://127.0.0.1:5000/`.
+
 ## Progress
 
 - Step 1 ( Done ): Set up the project — create the folder structure, initialize a virtual environment, install dependencies (wikipedia-api, sentence-transformers, torch, numpy, matplotlib), and create requirements.txt.
@@ -375,3 +416,107 @@ Failure Case: Barack Obama → Pitaya (4/28/2026)
 We discovered that the target title itself can make a pair unsolvable for the embedding heuristic. "Barack Obama → Dragon fruit" succeeds in 10 hops (14 expansions, 0.4s warm), but "Barack Obama → Pitaya" — the same Wikipedia article under its canonical botanical name — times out at 500 nodes with both MiniLM and Model2Vec.
 The reason is a mismatch between semantic similarity and graph connectivity. The heuristic correctly guides the search toward fruit-related pages, but almost no Wikipedia pages actually contain a link titled "Pitaya" — they link to "Dragon fruit" instead. So the search arrives in the right topic neighborhood but can never find the final hop, and spirals through increasingly obscure fruit and botany pages until it hits the node cap.
 This reveals a fundamental limitation of title-based embedding heuristics: they measure how semantically close a neighbor sounds to the target, not whether the target is actually reachable from that neighbor. When the target uses an uncommon or technical title that few pages link to, the heuristic has no way to detect the dead end. This is the strongest argument we've found so far for LLM integration — an LLM would recognize that "Dragon fruit" and "Pitaya" refer to the same thing and select the right link even when the embedding model can't.
+
+
+# Wikipedia Pathfinding Algorithm Results
+
+| Pair | Algorithm | Status | Path Length | Nodes Expanded | Algorithm Time | Memory | Path |
+|------|-----------|--------|-------------|----------------|----------------|--------|------|
+| Michelle Obama → United Kingdom | Greedy | success | 2 | 5 | 0.18s | 4.6 MB | Michelle Obama → Americans → United Kingdom |
+| Michelle Obama → United Kingdom | Greedy | success | 2 | 5 | 0.25s | 4.6 MB | Michelle Obama → Americans → United Kingdom |
+| Michelle Obama → United States | Greedy | success | 2 | 3 | 0.04s | 4.6 MB | Michelle Obama → Americans → United States |
+| Eiffel Tower → World War II | A* | success | 2 | 2 | 10.60s | 224.6 MB | Eiffel Tower → World War I → World War II |
+| Eiffel Tower → World War II | Greedy | success | 2 | 2 | ~0s | 2.6 MB | Eiffel Tower → World War I → World War II |
+| Frog → Adolf Hitler | Greedy | success | 4 | 4 | 30.90s | 227.7 MB | Frog → Moses → Abraham Lincoln → Mahatma Gandhi → Adolf Hitler |
+| Frog → Adolf Hitler | A* | success | 3 | 11 | 40.64s | 228.1 MB | Frog → German language → Nazi Germany → Adolf Hitler |
+| Photosynthesis → Socrates | A* (cold) | success | 3 | 14 | 66.55s | 233.3 MB | Photosynthesis → Scientist → Philosopher → Socrates |
+| Photosynthesis → Socrates | Greedy (cold) | success | 3 | 3 | 1.28s | 3.3 MB | Photosynthesis → A Greek-English Lexicon → Ancient Greek → Socrates |
+| Photosynthesis → Socrates | A* (warm) | success | 3 | 14 | 0.18s | 4.0 MB | Photosynthesis → Scientist → Philosopher → Socrates |
+| Photosynthesis → Socrates | Greedy (warm) | success | 3 | 3 | 0.02s | 3.3 MB | Photosynthesis → A Greek-English Lexicon → Ancient Greek → Socrates |
+| Photosynthesis → Socrates | DFS | timeout | 0 | 500 | 4.01s | 0 MB | — |
+| Photosynthesis → Socrates | BFS | timeout | 0 | 500 | 281.82s | 0 MB | — |
+| Frog → Arnold Schwarzenegger | BFS | timeout | 0 | 500 | 250.44s | 0 MB | — |
+| Frog → Arnold Schwarzenegger | DFS | timeout | 0 | 500 | 4.65s | 0 MB | — |
+| Frog → Arnold Schwarzenegger | Greedy | timeout | 0 | 500+ | >900s | — | — |
+
+
+
+Key Findings
+1. Uninformed search is confirmed useless beyond 1-2 hops. BFS and DFS both hit the 500-node cap on every multi-hop pair. BFS takes ~250–280 seconds to fail because each expansion requires a live API call. DFS fails in ~4–5 seconds because it blows through cached nodes quickly but goes in completely wrong directions. Neither algorithm found a single path in your tests.
+2. Greedy is the practical champion. It finds paths with minimal expansions (2–5 nodes on most pairs), uses very little memory (2–4 MB), and runs in under a second on warm cache. Even on cold runs it's dramatically faster than A* because it computes fewer embeddings total.
+3. A finds shorter paths but at steep cost.* The Frog → Adolf Hitler pair is the clearest example: A* found a 3-hop path where Greedy took 4, but it needed 11 expansions, 40 seconds, and 228 MB of memory to do it. The cost multiplier is roughly 3–10x time and 50–100x memory for a 1-hop improvement.
+4. Cold vs warm cache is the dominant performance factor. A* on Photosynthesis → Socrates went from 66.5s to 0.18s — a 370x speedup. Greedy went from 1.28s to 0.02s — a 64x speedup. Once embeddings are cached, both algorithms are essentially instant. This means your caching layer is working well, but first-run experience is still rough.
+5. Greedy can hang on hard pairs. Your Frog → Arnold Schwarzenegger run with Greedy didn't return after 15 minutes. This is the same failure mode you documented with Barack Obama → Pitaya — the heuristic guides the search into the right neighborhood but can't find the final link. Without a timeout, it just spirals indefinitely. This is a critical gap.
+6. Memory reporting is inconsistent. BFS and DFS report 0 MB on timeout, which is likely a bug in your metrics collection — the memory counter probably only records on success. Cold-run Greedy sometimes shows ~228 MB (PyTorch model in memory) and sometimes ~3 MB, suggesting the memory metric is measuring different things depending on whether the model was freshly loaded.
+
+
+
+
+RESULTS:
+
+5/2/2026
+(wikipedia_game) PS C:\Users\User\Desktop\ai_proj\wikipedia_game> python server\app.py
+ * Serving Flask app 'app'
+ * Debug mode: on
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:5000
+Press CTRL+C to quit
+127.0.0.1 - - [02/May/2026 11:37:24] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [02/May/2026 11:37:24] "GET /static/autocomplete.js HTTP/1.1" 304 -
+127.0.0.1 - - [02/May/2026 11:37:24] "GET /static/style.css HTTP/1.1" 304 -
+127.0.0.1 - - [02/May/2026 11:37:24] "GET /static/script.js HTTP/1.1" 200 -
+Incoming request: {'algorithm': 'astar', 'sourceValue': 'Frog', 'targetValue': 'Arnold Schwarzenegger', 'timeoutSeconds': 300, 'logEvery': 10}
+[A*] expanded=10 current='Michigan J. Frog' f=2.9703 g=1 heap=2238 closed=10
+[A*] expanded=20 current='Kermit the Frog' f=3.0408 g=1 heap=5737 closed=20
+[A*] expanded=30 current='Glass frog' f=3.1099 g=1 heap=6422 closed=30
+[A*] expanded=40 current='Carnivorous' f=3.1443 g=1 heap=8167 closed=40
+[A*] expanded=50 current='African clawed frog' f=3.1771 g=1 heap=10897 closed=50
+[A*] expanded=60 current='Poison dart frog' f=3.1946 g=1 heap=14108 closed=60
+[A*] expanded=70 current='African dwarf frog' f=3.2139 g=1 heap=15406 closed=70
+[A*] expanded=80 current='Rainforest rocket frog' f=3.2253 g=1 heap=16116 closed=80
+[A*] expanded=90 current='Devonian' f=3.2471 g=1 heap=18569 closed=90
+[A*] expanded=100 current='Egg' f=3.2604 g=1 heap=18978 closed=100
+[A*] expanded=110 current='Fish' f=3.2723 g=1 heap=21113 closed=110
+[A*] expanded=120 current='André Marie Constant Duméril' f=3.2852 g=1 heap=22759 closed=120
+[A*] expanded=130 current='The Frog Prince' f=3.3000 g=1 heap=23320 closed=130
+[A*] expanded=140 current='Ordovician' f=3.3121 g=1 heap=28155 closed=140
+[A*] expanded=150 current='Pacific Tree Frog' f=3.3294 g=1 heap=30868 closed=150
+[A*] expanded=160 current='Panamanian golden frog' f=3.3389 g=1 heap=32786 closed=160
+[A*] expanded=170 current='Daniel Kahneman' f=3.2588 g=2 heap=33350 closed=170
+[A*] expanded=180 current='Northern cricket frog' f=3.3679 g=1 heap=35435 closed=180
+[A*] expanded=190 current='Palaeoproteus' f=3.3762 g=1 heap=36192 closed=190
+[A*] expanded=200 current='Ventral' f=3.3848 g=1 heap=36337 closed=200
+[A*] expanded=210 current='Herbivorous' f=3.3886 g=1 heap=38544 closed=210
+[A*] expanded=220 current='Toad' f=3.3988 g=1 heap=39720 closed=220
+[A*] expanded=230 current='Cuisine' f=3.4045 g=1 heap=42162 closed=230
+127.0.0.1 - - [02/May/2026 11:42:49] "POST /search HTTP/1.1" 504 -
+
+
+
+
+A is trapped at depth 1.* Look at the g=1 column — almost every expansion is a direct neighbor of "Frog." After 230 expansions, it has only gone to depth 2 once (Daniel Kahneman at expansion 170). The g(n) term in f(n) = g(n) + 3h(n) is keeping all the depth-1 nodes scored lower than any depth-2 node, so A* exhaustively explores every frog-related page before it even considers going deeper. It's essentially doing BFS on the first layer with extra overhead.
+The heap is exploding. It grew from 2,238 entries at expansion 10 to 42,162 at expansion 230. Every expansion adds ~700 neighbors to the heap, and since A* never discards them, memory and scoring cost grow linearly. At this rate, even the 500-node cap wouldn't save you — the heap alone is consuming massive resources.
+The heuristic can't bridge the gap. The f-scores are all clustered between 3.0 and 3.4, meaning every neighbor of Frog looks roughly equally bad relative to Arnold Schwarzenegger. The heuristic has no strong signal to follow, so it just picks the lowest-scoring frog variant — Michigan J. Frog, Kermit the Frog, Glass frog, Poison dart frog — none of which are useful steps toward the target.
+Compare this to Greedy on the same pair. Greedy wouldn't get stuck like this because it ignores g(n) entirely. It would pick whichever neighbor of Frog has the lowest heuristic distance to Arnold Schwarzenegger and commit to that direction immediately, going deeper rather than wider. Greedy timed out too on this pair, but probably for a different reason — it likely went deep into a wrong topic cluster rather than getting stuck at depth 1.
+The core issue is that your weight of 3.0 isn't high enough for semantically distant pairs. When source and target are unrelated, all neighbors score similarly, and the g(n) term dominates the ordering. You'd need a much higher weight (maybe 10+) to force A* to behave more like Greedy on these hard pairs, but then you lose the optimality benefit that justifies using A* at all.
+
+
+127.0.0.1 - - [02/May/2026 11:42:49] "POST /search HTTP/1.1" 504 -
+Incoming request: {'algorithm': 'greedy', 'sourceValue': 'Frog', 'targetValue': 'Arnold Schwarzenegger', 'timeoutSeconds': 300, 'logEvery': 10}
+[Greedy] expanded=10 current='Thomas Arnold' h=0.2957 heap=5930 visited=10
+[Greedy] expanded=20 current='Thomas James Arnold' h=0.3438 heap=6749 visited=20
+[Greedy] expanded=30 current='Thomas Dickens Arnold' h=0.3928 heap=7351 visited=30
+[Greedy] expanded=40 current='Thomas Arnold (bobsleigh)' h=0.4288 heap=8871 visited=40
+[Greedy] expanded=50 current='Thomas Arnold (Royal Navy officer)' h=0.4520 heap=9438 visited=50
+[Greedy] expanded=60 current='Laurent Schwarz (artist)' h=0.4332 heap=14264 visited=60
+[Greedy] expanded=70 current='Georges Glaeser' h=0.4708 heap=17937 visited=70
+127.0.0.1 - - [02/May/2026 11:46:18] "POST /search HTTP/1.1" 200 -
+
+
+
+Greedy found the path, but look at the journey it took. The log tells a fascinating story. After leaving Frog, it went to Hawk, then War hawk, then into American politics (Lindsey Graham → Jared Kushner → Steve Bannon), then it hit Adolf Hitler, pivoted to Ronald Reagan, and finally reached Arnold Schwarzenegger. That's 8 hops through a wild chain of associations — frogs → predatory birds → political hawks → Trump administration → Hitler → Republican politics → Arnold.
+But the log reveals a problem with the heuristic. Look at expansions 10–50: it got fixated on people named "Thomas Arnold." The heuristic is matching on the word "Arnold" in "Arnold Schwarzenegger" and concluding that anyone named Arnold must be semantically close to the target. It burned through 50 expansions exploring various Thomas Arnolds — a bobsledder, a navy officer, a scholar — none of which were useful. Then around expansion 60 it started chasing "Schwarz" variants (Laurent Schwarz), trying to match the "Schwarz" in "Schwarzenegger."
+This is a fundamental weakness of title-based embeddings. The model is doing string-level similarity rather than conceptual similarity. It thinks "Thomas Arnold (bobsleigh)" is closer to "Arnold Schwarzenegger" than "Ronald Reagan" is, because the names share a word. A summary-based embedding would know that Reagan and Schwarzenegger are both Republican politicians from California, but a title embedding just sees matching substrings.
+The good news is it still worked. Despite wasting ~50 expansions on name-matching dead ends, Greedy eventually stumbled onto a productive path through politics. 74 expansions and 43 seconds is expensive compared to the easy pairs, but it's infinitely better than A*'s result on the same pair — A* was still stuck at depth 1 after 230 expansions when it timed out.
+The path itself is surprisingly coherent once it gets going. Frog → Hawk is a food chain link. Hawk → War hawk is a disambiguation hop. War hawk → Lindsey Graham is a political connection. Then it chains through Trump-era political figures to Hitler (via Bannon's controversial associations), and Hitler → Reagan → Schwarzenegger follows a logical thread of 20th century political figures with the Austrian/American connection.
+Key takeaway for your project: this pair exposes both the strength and the weakness of your approach. The heuristic is powerful enough to eventually navigate across wildly different topics (amphibians to movie stars), but title-based embeddings create false attractors when the target's name contains common words. This is your strongest evidence yet for why summary-based or LLM-based heuristics would be a meaningful upgrade.

@@ -65,12 +65,12 @@ python3 -m venv .venv
 
 ### Windows
 ```powershell
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 ```
 
 If you created the venv inside `wikipedia_game/` (the `uv` commands above do this), activate it from the repo root with:
 ```powershell
-wikipedia_game\.venv\Scripts\activate
+.\wikipedia_game\.venv\Scripts\Activate.ps1
 ```
 
 ### macOS / Linux
@@ -129,6 +129,36 @@ python wikipedia_game/visualize.py
 ```
 
 Charts will be saved to `results/`.
+
+---
+
+## 8. (Optional) Run the Web UI
+
+This repo includes a small Flask app in `wikipedia_game/server/app.py`.
+
+### Install server deps
+
+With pip:
+
+```bash
+pip install -r wikipedia_game/requirements-server.txt
+```
+
+With uv:
+
+```bash
+cd wikipedia_game
+uv sync --extra server
+cd ..
+```
+
+### Start the server
+
+```bash
+python wikipedia_game/server/app.py
+```
+
+Then open `http://127.0.0.1:5000/`.
 
 ---
 
