@@ -1,5 +1,5 @@
 # Wikipedia Game — Setup Guide
-
+# The final run is recommended by the part 8 UI 8. (Optional) Run the Web UI 
 ## Requirements
 - Python 3.10+
 - `uv` (recommended) or `pip`
@@ -132,7 +132,7 @@ Charts will be saved to `results/`.
 
 ---
 
-## 8. (Optional) Run the Web UI
+## 8. (Optional) Run the Web UI 
 
 This repo includes a small Flask app in `wikipedia_game/server/app.py`.
 
